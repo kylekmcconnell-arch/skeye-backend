@@ -27,7 +27,9 @@ router.get('/:username', optionalAuth, async (req, res) => {
       `SELECT 
         (SELECT COUNT(*) FROM sightings WHERE user_id = $1) as clips_count,
         (SELECT COUNT(*) FROM devices WHERE user_id = $1) as devices_count,
-        (SELECT COUNT(*) FROM user_classifications WHERE user_id = $1) as classifications_count`,
+        (SELECT COUNT(*) FROM user_classifications WHERE user_id = $1) as classifications_count,
+        (SELECT COUNT(*) FROM sighting_comments WHERE user_id = $1) as comments_count,
+        (SELECT COUNT(*) FROM sighting_likes WHERE user_id = $1) as likes_count`,
       [user.id]
     );
 
@@ -49,7 +51,9 @@ router.get('/:username', optionalAuth, async (req, res) => {
       stats: {
         clipsCount: parseInt(stats.rows[0].clips_count) || 0,
         devicesCount: parseInt(stats.rows[0].devices_count) || 0,
-        classificationsCount: parseInt(stats.rows[0].classifications_count) || 0
+        classificationsCount: parseInt(stats.rows[0].classifications_count) || 0,
+        commentsCount: parseInt(stats.rows[0].comments_count) || 0,
+        likesCount: parseInt(stats.rows[0].likes_count) || 0
       }
     });
   } catch (error) {
