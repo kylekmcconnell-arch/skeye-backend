@@ -58,6 +58,47 @@ router.get('/:username', optionalAuth, async (req, res) => {
   }
 });
 
+// Get user's comments
+router.get('/:username/comments', async (req, res) => {
+  try {
+    const { username } = req.params;
+
+    // Get user ID
+    const userResult = await pool.query(
+      'SELECT id FROM users WHERE username = $1',
+      [username]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userId = userResult.rows[0].id;
+
+    const result = await pool.query(
+      `SELECT sc.*, s.location as sighting_location, s.classification as sighting_classification
+       FROM sighting_comments sc
+       JOIN sightings s ON sc.sighting_id = s.id
+       WHERE sc.user_id = $1
+       ORDER BY sc.created_at DESC
+       LIMIT 100`,
+      [userId]
+    );
+
+    res.json(result.rows.map(c => ({
+      id: c.id,
+      text: c.text,
+      createdAt: c.created_at,
+      sightingId: c.sighting_id,
+      sightingLocation: c.sighting_location,
+      sightingClassification: c.sighting_classification
+    })));
+  } catch (error) {
+    console.error('Get user comments error:', error);
+    res.status(500).json({ error: 'Failed to get comments' });
+  }
+});
+
 // Get user's public clips (sightings they uploaded)
 router.get('/:username/clips', async (req, res) => {
   try {
