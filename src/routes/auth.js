@@ -9,7 +9,7 @@ const router = express.Router();
 // Sign up
 router.post('/signup', async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { username, email, password, avatarUrl } = req.body;
 
     // Validate input
     if (!username || !email || !password) {
@@ -40,10 +40,10 @@ router.post('/signup', async (req, res) => {
 
     // Create user
     const result = await pool.query(
-      `INSERT INTO users (username, email, password_hash, skeye_balance) 
-       VALUES ($1, $2, $3, $4) 
+      `INSERT INTO users (username, email, password_hash, avatar_url, skeye_balance) 
+       VALUES ($1, $2, $3, $4, $5) 
        RETURNING id, username, email, avatar_url, skeye_balance, role, created_at`,
-      [username, email.toLowerCase(), passwordHash, 100] // Start with 100 $SKEYE
+      [username, email.toLowerCase(), passwordHash, avatarUrl || null, 100] // Start with 100 $SKEYE
     );
 
     const user = result.rows[0];
@@ -158,7 +158,7 @@ router.get('/me', authenticate, async (req, res) => {
 // Update profile
 router.put('/profile', authenticate, async (req, res) => {
   try {
-    const { username, bio } = req.body;
+    const { username, bio, avatarUrl } = req.body;
     const updates = [];
     const values = [];
     let paramCount = 1;
@@ -179,6 +179,11 @@ router.put('/profile', authenticate, async (req, res) => {
     if (bio !== undefined) {
       updates.push(`bio = $${paramCount++}`);
       values.push(bio);
+    }
+
+    if (avatarUrl !== undefined) {
+      updates.push(`avatar_url = $${paramCount++}`);
+      values.push(avatarUrl);
     }
 
     if (updates.length === 0) {
