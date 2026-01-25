@@ -75,7 +75,8 @@ router.get('/:username/comments', async (req, res) => {
 
     const userId = userResult.rows[0].id;
 
-    const result = await pool.query(
+    // Get sighting comments
+    const sightingComments = await pool.query(
       `SELECT sc.*, s.location as sighting_location, s.classification as sighting_classification
        FROM sighting_comments sc
        JOIN sightings s ON sc.sighting_id = s.id
@@ -85,14 +86,20 @@ router.get('/:username/comments', async (req, res) => {
       [userId]
     );
 
-    res.json(result.rows.map(c => ({
+    // TODO: Add community thread comments when that feature is built
+    // For now, just return sighting comments with a type field
+
+    const comments = sightingComments.rows.map(c => ({
       id: c.id,
       text: c.text,
       createdAt: c.created_at,
+      type: 'sighting',
       sightingId: c.sighting_id,
       sightingLocation: c.sighting_location,
       sightingClassification: c.sighting_classification
-    })));
+    }));
+
+    res.json(comments);
   } catch (error) {
     console.error('Get user comments error:', error);
     res.status(500).json({ error: 'Failed to get comments' });
