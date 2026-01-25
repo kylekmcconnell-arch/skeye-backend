@@ -11,6 +11,7 @@ const videosRoutes = require('./routes/videos');
 const sightingsRoutes = require('./routes/sightings');
 const usersRoutes = require('./routes/users');
 const notificationsRoutes = require('./routes/notifications');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -80,6 +81,7 @@ app.use('/api/videos', videosRoutes);
 app.use('/api/sightings', sightingsRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
