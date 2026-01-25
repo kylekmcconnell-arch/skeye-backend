@@ -62,7 +62,7 @@ router.get('/:username', optionalAuth, async (req, res) => {
 router.get('/:username/clips', async (req, res) => {
   try {
     const { username } = req.params;
-    const { page = 1, limit = 50 } = req.query;
+    const { page = 1, limit = 500 } = req.query;
     const offset = (page - 1) * limit;
 
     // Get user ID
@@ -77,6 +77,13 @@ router.get('/:username/clips', async (req, res) => {
 
     const userId = userResult.rows[0].id;
 
+    // Get total count
+    const countResult = await pool.query(
+      'SELECT COUNT(*) FROM sightings WHERE user_id = $1',
+      [userId]
+    );
+    const totalClips = parseInt(countResult.rows[0].count);
+
     const result = await pool.query(
       `SELECT s.*, 
         (SELECT COUNT(*) FROM sighting_likes WHERE sighting_id = s.id) as likes_count,
@@ -89,6 +96,7 @@ router.get('/:username/clips', async (req, res) => {
     );
 
     res.json({
+      total: totalClips,
       clips: result.rows.map(s => ({
         id: s.id,
         location: s.location,
