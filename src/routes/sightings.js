@@ -4,17 +4,16 @@ const { authenticate, optionalAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Get all sightings (for map)
-router.get('/', optionalAuth, async (req, res) => {
+// Get all sightings (for map) - queries from sightings table
+router.get('/', async (req, res) => {
   try {
     const { 
-      timeRange = '24h', 
+      timeRange = 'all', 
       classification,
-      minLat, maxLat, minLng, maxLng,
       limit = 100 
     } = req.query;
 
-    let whereClause = "WHERE v.status = 'ready'";
+    let whereClause = "WHERE 1=1";
     const params = [];
     let paramCount = 1;
 
@@ -25,60 +24,30 @@ router.get('/', optionalAuth, async (req, res) => {
       '30d': '30 days'
     };
     if (timeFilters[timeRange]) {
-      whereClause += ` AND v.created_at > NOW() - INTERVAL '${timeFilters[timeRange]}'`;
+      whereClause += ` AND s.created_at > NOW() - INTERVAL '${timeFilters[timeRange]}'`;
     }
 
     // Classification filter
     if (classification) {
       const classifications = classification.split(',');
-      whereClause += ` AND v.classification IN (${classifications.map((_, i) => `$${paramCount++}`).join(',')})`;
+      whereClause += ` AND s.classification IN (${classifications.map((_, i) => `$${paramCount++}`).join(',')})`;
       params.push(...classifications);
-    }
-
-    // Bounding box filter
-    if (minLat && maxLat && minLng && maxLng) {
-      whereClause += ` AND v.latitude BETWEEN $${paramCount++} AND $${paramCount++}`;
-      whereClause += ` AND v.longitude BETWEEN $${paramCount++} AND $${paramCount++}`;
-      params.push(minLat, maxLat, minLng, maxLng);
     }
 
     params.push(limit);
 
     const result = await pool.query(
-      `SELECT v.id, v.title, v.filename, v.location, v.latitude, v.longitude,
-        v.classification, v.ai_confidence, v.created_at,
-        u.id as user_id, u.username, u.avatar_url,
-        (SELECT COUNT(*) FROM likes WHERE video_id = v.id) as likes_count,
-        (SELECT COUNT(*) FROM comments WHERE video_id = v.id) as comments_count
-       FROM videos v
-       JOIN users u ON v.user_id = u.id
+      `SELECT s.*, u.username as uploader_username, u.avatar_url as uploader_avatar
+       FROM sightings s
+       LEFT JOIN users u ON s.user_id = u.id
        ${whereClause}
-       AND v.latitude IS NOT NULL AND v.longitude IS NOT NULL
-       ORDER BY v.created_at DESC
+       AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL
+       ORDER BY s.created_at DESC
        LIMIT $${paramCount}`,
       params
     );
 
-    res.json({
-      sightings: result.rows.map(s => ({
-        id: s.id,
-        title: s.title,
-        filename: s.filename,
-        location: s.location,
-        lat: parseFloat(s.latitude),
-        lng: parseFloat(s.longitude),
-        classification: s.classification,
-        aiConfidence: s.ai_confidence,
-        likesCount: parseInt(s.likes_count),
-        commentsCount: parseInt(s.comments_count),
-        createdAt: s.created_at,
-        user: {
-          id: s.user_id,
-          username: s.username,
-          avatarUrl: s.avatar_url
-        }
-      }))
-    });
+    res.json(result.rows);
   } catch (error) {
     console.error('Get sightings error:', error);
     res.status(500).json({ error: 'Failed to get sightings' });
