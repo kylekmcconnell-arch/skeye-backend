@@ -37,7 +37,9 @@ router.get('/', async (req, res) => {
     params.push(limit);
 
     const result = await pool.query(
-      `SELECT s.*, u.username as uploader_username, u.avatar_url as uploader_avatar
+      `SELECT s.*, u.username as uploader_username, u.avatar_url as uploader_avatar,
+        (SELECT COUNT(*) FROM sighting_likes WHERE sighting_id = s.id) as likes_count,
+        (SELECT COUNT(*) FROM sighting_comments WHERE sighting_id = s.id) as comments_count
        FROM sightings s
        LEFT JOIN users u ON s.user_id = u.id
        ${whereClause}
@@ -47,105 +49,178 @@ router.get('/', async (req, res) => {
       params
     );
 
-    res.json(result.rows);
+    res.json(result.rows.map(r => ({
+      ...r,
+      likes_count: parseInt(r.likes_count) || 0,
+      comments_count: parseInt(r.comments_count) || 0
+    })));
   } catch (error) {
     console.error('Get sightings error:', error);
     res.status(500).json({ error: 'Failed to get sightings' });
   }
 });
 
-// Get trending sightings
-router.get('/trending', optionalAuth, async (req, res) => {
+// Get user's classifications for sightings
+router.get('/my-classifications', authenticate, async (req, res) => {
   try {
-    const { limit = 20 } = req.query;
-
     const result = await pool.query(
-      `SELECT v.*, u.username, u.avatar_url,
-        (SELECT COUNT(*) FROM likes WHERE video_id = v.id) as likes_count,
-        (SELECT COUNT(*) FROM comments WHERE video_id = v.id) as comments_count,
-        (SELECT COUNT(*) FROM likes WHERE video_id = v.id AND created_at > NOW() - INTERVAL '24 hours') as recent_likes
-       FROM videos v
-       JOIN users u ON v.user_id = u.id
-       WHERE v.status = 'ready'
-       ORDER BY recent_likes DESC, v.views DESC, v.created_at DESC
-       LIMIT $1`,
-      [limit]
+      `SELECT sighting_id, classification FROM user_classifications WHERE user_id = $1`,
+      [req.user.id]
     );
-
-    res.json({
-      sightings: result.rows.map(s => ({
-        id: s.id,
-        title: s.title,
-        filename: s.filename,
-        location: s.location,
-        lat: s.latitude ? parseFloat(s.latitude) : null,
-        lng: s.longitude ? parseFloat(s.longitude) : null,
-        classification: s.classification,
-        aiConfidence: s.ai_confidence,
-        views: s.views,
-        likesCount: parseInt(s.likes_count),
-        commentsCount: parseInt(s.comments_count),
-        createdAt: s.created_at,
-        user: {
-          id: s.user_id,
-          username: s.username,
-          avatarUrl: s.avatar_url
-        }
-      }))
+    
+    // Return as object { sighting_id: classification }
+    const classifications = {};
+    result.rows.forEach(r => {
+      classifications[r.sighting_id] = r.classification;
     });
+    
+    res.json(classifications);
   } catch (error) {
-    console.error('Get trending error:', error);
-    res.status(500).json({ error: 'Failed to get trending sightings' });
+    console.error('Get classifications error:', error);
+    res.status(500).json({ error: 'Failed to get classifications' });
   }
 });
 
-// Get sightings needing classification
-router.get('/classify', optionalAuth, async (req, res) => {
+// Submit a classification
+router.post('/:id/classify', authenticate, async (req, res) => {
   try {
-    const { limit = 20 } = req.query;
-
-    let excludeClause = '';
-    if (req.user) {
-      excludeClause = `AND v.id NOT IN (SELECT video_id FROM classifications WHERE user_id = '${req.user.id}')`;
+    const { id } = req.params;
+    const { classification } = req.body;
+    
+    if (!classification) {
+      return res.status(400).json({ error: 'Classification required' });
     }
-
-    const result = await pool.query(
-      `SELECT v.*, u.username, u.avatar_url,
-        (SELECT COUNT(*) FROM likes WHERE video_id = v.id) as likes_count,
-        (SELECT COUNT(*) FROM comments WHERE video_id = v.id) as comments_count,
-        (SELECT COUNT(*) FROM classifications WHERE video_id = v.id) as classification_count
-       FROM videos v
-       JOIN users u ON v.user_id = u.id
-       WHERE v.status = 'ready' ${excludeClause}
-       ORDER BY classification_count ASC, v.created_at DESC
-       LIMIT $1`,
-      [limit]
+    
+    // Upsert classification
+    await pool.query(
+      `INSERT INTO user_classifications (user_id, sighting_id, classification)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, sighting_id) 
+       DO UPDATE SET classification = $3, created_at = CURRENT_TIMESTAMP`,
+      [req.user.id, id, classification]
     );
+    
+    res.json({ success: true, classification });
+  } catch (error) {
+    console.error('Submit classification error:', error);
+    res.status(500).json({ error: 'Failed to submit classification' });
+  }
+});
 
+// Get comments for a sighting
+router.get('/:id/comments', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const result = await pool.query(
+      `SELECT c.*, u.username, u.avatar_url
+       FROM sighting_comments c
+       JOIN users u ON c.user_id = u.id
+       WHERE c.sighting_id = $1
+       ORDER BY c.created_at DESC
+       LIMIT 50`,
+      [id]
+    );
+    
+    res.json(result.rows.map(r => ({
+      id: r.id,
+      text: r.text,
+      createdAt: r.created_at,
+      user: {
+        username: r.username,
+        avatar: r.username[0].toUpperCase(),
+        avatarUrl: r.avatar_url
+      }
+    })));
+  } catch (error) {
+    console.error('Get comments error:', error);
+    res.status(500).json({ error: 'Failed to get comments' });
+  }
+});
+
+// Post a comment
+router.post('/:id/comments', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { text } = req.body;
+    
+    if (!text || text.trim().length === 0) {
+      return res.status(400).json({ error: 'Comment text required' });
+    }
+    
+    const result = await pool.query(
+      `INSERT INTO sighting_comments (user_id, sighting_id, text)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [req.user.id, id, text.trim()]
+    );
+    
+    // Get user info
+    const userResult = await pool.query(
+      `SELECT username, avatar_url FROM users WHERE id = $1`,
+      [req.user.id]
+    );
+    
     res.json({
-      sightings: result.rows.map(s => ({
-        id: s.id,
-        title: s.title,
-        filename: s.filename,
-        location: s.location,
-        lat: s.latitude ? parseFloat(s.latitude) : null,
-        lng: s.longitude ? parseFloat(s.longitude) : null,
-        classification: s.classification,
-        aiConfidence: s.ai_confidence,
-        likesCount: parseInt(s.likes_count),
-        commentsCount: parseInt(s.comments_count),
-        classificationCount: parseInt(s.classification_count),
-        createdAt: s.created_at,
-        user: {
-          id: s.user_id,
-          username: s.username,
-          avatarUrl: s.avatar_url
-        }
-      }))
+      id: result.rows[0].id,
+      text: result.rows[0].text,
+      createdAt: result.rows[0].created_at,
+      user: {
+        username: userResult.rows[0].username,
+        avatar: userResult.rows[0].username[0].toUpperCase(),
+        avatarUrl: userResult.rows[0].avatar_url
+      }
     });
   } catch (error) {
-    console.error('Get classify error:', error);
-    res.status(500).json({ error: 'Failed to get sightings for classification' });
+    console.error('Post comment error:', error);
+    res.status(500).json({ error: 'Failed to post comment' });
+  }
+});
+
+// Like a sighting
+router.post('/:id/like', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Toggle like
+    const existing = await pool.query(
+      `SELECT id FROM sighting_likes WHERE user_id = $1 AND sighting_id = $2`,
+      [req.user.id, id]
+    );
+    
+    if (existing.rows.length > 0) {
+      // Unlike
+      await pool.query(
+        `DELETE FROM sighting_likes WHERE user_id = $1 AND sighting_id = $2`,
+        [req.user.id, id]
+      );
+      res.json({ liked: false });
+    } else {
+      // Like
+      await pool.query(
+        `INSERT INTO sighting_likes (user_id, sighting_id) VALUES ($1, $2)`,
+        [req.user.id, id]
+      );
+      res.json({ liked: true });
+    }
+  } catch (error) {
+    console.error('Like error:', error);
+    res.status(500).json({ error: 'Failed to toggle like' });
+  }
+});
+
+// Get user's likes
+router.get('/my-likes', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT sighting_id FROM sighting_likes WHERE user_id = $1`,
+      [req.user.id]
+    );
+    
+    res.json(result.rows.map(r => r.sighting_id));
+  } catch (error) {
+    console.error('Get likes error:', error);
+    res.status(500).json({ error: 'Failed to get likes' });
   }
 });
 
