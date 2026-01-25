@@ -1,8 +1,82 @@
 const express = require('express');
 const pool = require('../../config/database');
 const { authenticate, optionalAuth } = require('../middleware/auth');
+const { createClient } = require('@supabase/supabase-js');
 
 const router = express.Router();
+
+// Initialize Supabase client for storage
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null;
+
+// Save thumbnail for a sighting (can be called by any authenticated user)
+// This enables lazy thumbnail generation from the frontend
+router.post('/:id/thumbnail', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { thumbnailBase64 } = req.body;
+    
+    if (!thumbnailBase64) {
+      return res.status(400).json({ error: 'Thumbnail data required' });
+    }
+    
+    // Check if sighting exists and doesn't already have a thumbnail
+    const existing = await pool.query(
+      'SELECT id, thumbnail_url FROM sightings WHERE id = $1',
+      [id]
+    );
+    
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Sighting not found' });
+    }
+    
+    // If already has thumbnail, skip
+    if (existing.rows[0].thumbnail_url) {
+      return res.json({ success: true, thumbnailUrl: existing.rows[0].thumbnail_url, cached: true });
+    }
+    
+    if (!supabase) {
+      return res.status(500).json({ error: 'Storage not configured' });
+    }
+    
+    // Convert base64 to buffer
+    const base64Data = thumbnailBase64.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+    
+    // Upload to Supabase Storage
+    const fileName = `thumbnails/${id}_${Date.now()}.jpg`;
+    const { data, error } = await supabase.storage
+      .from('sightings')
+      .upload(fileName, buffer, {
+        contentType: 'image/jpeg',
+        upsert: true
+      });
+    
+    if (error) {
+      console.error('Supabase upload error:', error);
+      return res.status(500).json({ error: 'Failed to upload thumbnail' });
+    }
+    
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from('sightings')
+      .getPublicUrl(fileName);
+    
+    const thumbnailUrl = urlData.publicUrl;
+    
+    // Update sighting with thumbnail URL
+    await pool.query(
+      'UPDATE sightings SET thumbnail_url = $1 WHERE id = $2',
+      [thumbnailUrl, id]
+    );
+    
+    res.json({ success: true, thumbnailUrl });
+  } catch (error) {
+    console.error('Save thumbnail error:', error);
+    res.status(500).json({ error: 'Failed to save thumbnail' });
+  }
+});
 
 // Get all sightings (for map) - queries from sightings table
 router.get('/', async (req, res) => {
