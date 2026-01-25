@@ -48,8 +48,8 @@ router.post('/sightings', authenticate, requireAdmin, async (req, res) => {
       aiConfidence 
     } = req.body;
 
-    // Validate required fields
-    if (!title || !videoUrl || !location || !latitude || !longitude || !classification) {
+    // Validate required fields (title is optional)
+    if (!videoUrl || !location || !latitude || !longitude || !classification) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
@@ -61,7 +61,7 @@ router.post('/sightings', authenticate, requireAdmin, async (req, res) => {
       RETURNING *
     `, [
       req.user.id,
-      title,
+      title || null,
       videoUrl,
       thumbnailUrl || null,
       location,
