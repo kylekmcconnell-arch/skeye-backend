@@ -11,7 +11,7 @@ router.get('/:username', optionalAuth, async (req, res) => {
     const { username } = req.params;
 
     const result = await pool.query(
-      `SELECT id, username, avatar_url, bio, skeye_balance, created_at
+      `SELECT id, username, avatar_url, bio, location, skeye_balance, created_at
        FROM users WHERE username = $1`,
       [username]
     );
@@ -25,11 +25,16 @@ router.get('/:username', optionalAuth, async (req, res) => {
     // Get user stats
     const stats = await pool.query(
       `SELECT 
-        (SELECT COUNT(*) FROM videos WHERE user_id = $1) as videos_count,
+        (SELECT COUNT(*) FROM sightings WHERE user_id = $1) as clips_count,
         (SELECT COUNT(*) FROM devices WHERE user_id = $1) as devices_count,
-        (SELECT COALESCE(SUM(views), 0) FROM videos WHERE user_id = $1) as total_views,
-        (SELECT COUNT(*) FROM classifications WHERE user_id = $1) as classifications_count`,
+        (SELECT COUNT(*) FROM user_classifications WHERE user_id = $1) as classifications_count`,
       [user.id]
+    );
+
+    // Get user rank (position based on skeye_balance)
+    const rankResult = await pool.query(
+      `SELECT COUNT(*) + 1 as rank FROM users WHERE skeye_balance > $1`,
+      [user.skeye_balance || 0]
     );
 
     res.json({
@@ -37,18 +42,70 @@ router.get('/:username', optionalAuth, async (req, res) => {
       username: user.username,
       avatarUrl: user.avatar_url,
       bio: user.bio,
-      skeyeBalance: user.skeye_balance,
+      location: user.location,
+      skeyeBalance: user.skeye_balance || 0,
+      rank: parseInt(rankResult.rows[0].rank),
       createdAt: user.created_at,
       stats: {
-        videosCount: parseInt(stats.rows[0].videos_count),
-        devicesCount: parseInt(stats.rows[0].devices_count),
-        totalViews: parseInt(stats.rows[0].total_views),
-        classificationsCount: parseInt(stats.rows[0].classifications_count)
+        clipsCount: parseInt(stats.rows[0].clips_count) || 0,
+        devicesCount: parseInt(stats.rows[0].devices_count) || 0,
+        classificationsCount: parseInt(stats.rows[0].classifications_count) || 0
       }
     });
   } catch (error) {
     console.error('Get user error:', error);
     res.status(500).json({ error: 'Failed to get user' });
+  }
+});
+
+// Get user's public clips (sightings they uploaded)
+router.get('/:username/clips', async (req, res) => {
+  try {
+    const { username } = req.params;
+    const { page = 1, limit = 50 } = req.query;
+    const offset = (page - 1) * limit;
+
+    // Get user ID
+    const userResult = await pool.query(
+      'SELECT id FROM users WHERE username = $1',
+      [username]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userId = userResult.rows[0].id;
+
+    const result = await pool.query(
+      `SELECT s.*, 
+        (SELECT COUNT(*) FROM sighting_likes WHERE sighting_id = s.id) as likes_count,
+        (SELECT COUNT(*) FROM sighting_comments WHERE sighting_id = s.id) as comments_count
+       FROM sightings s
+       WHERE s.user_id = $1
+       ORDER BY s.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [userId, limit, offset]
+    );
+
+    res.json({
+      clips: result.rows.map(s => ({
+        id: s.id,
+        location: s.location,
+        videoUrl: s.video_url,
+        thumbnailUrl: s.thumbnail_url,
+        classification: s.classification,
+        confidence: s.ai_confidence,
+        latitude: parseFloat(s.latitude),
+        longitude: parseFloat(s.longitude),
+        likesCount: parseInt(s.likes_count) || 0,
+        commentsCount: parseInt(s.comments_count) || 0,
+        createdAt: s.created_at
+      }))
+    });
+  } catch (error) {
+    console.error('Get user clips error:', error);
+    res.status(500).json({ error: 'Failed to get user clips' });
   }
 });
 
