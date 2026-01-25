@@ -134,7 +134,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get user's classifications for sightings
+// Get user's classifications for sightings - MUST come before /:id
 router.get('/my-classifications', authenticate, async (req, res) => {
   try {
     const result = await pool.query(
@@ -152,6 +152,38 @@ router.get('/my-classifications', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Get classifications error:', error);
     res.status(500).json({ error: 'Failed to get classifications' });
+  }
+});
+
+// Get a single sighting by ID
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id)) {
+      return res.status(400).json({ error: 'Invalid sighting ID' });
+    }
+    
+    const result = await pool.query(
+      `SELECT s.*, u.username as uploader_username, u.avatar_url as uploader_avatar,
+        (SELECT COUNT(*) FROM sighting_likes WHERE sighting_id = s.id) as likes_count,
+        (SELECT COUNT(*) FROM sighting_comments WHERE sighting_id = s.id) as comments_count
+       FROM sightings s
+       LEFT JOIN users u ON s.user_id = u.id
+       WHERE s.id = $1`,
+      [id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Sighting not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Get sighting error:', error);
+    res.status(500).json({ error: 'Failed to get sighting' });
   }
 });
 
