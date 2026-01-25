@@ -128,6 +128,7 @@ router.post('/signin', async (req, res) => {
 // Get current user
 router.get('/me', authenticate, async (req, res) => {
   try {
+    // Get user data
     const result = await pool.query(
       `SELECT id, username, email, avatar_url, bio, skeye_balance, role, created_at 
        FROM users WHERE id = $1`,
@@ -139,6 +140,14 @@ router.get('/me', authenticate, async (req, res) => {
     }
 
     const user = result.rows[0];
+
+    // Calculate rank based on signup order (created_at)
+    const rankResult = await pool.query(
+      `SELECT COUNT(*) + 1 as rank FROM users WHERE created_at < $1`,
+      [user.created_at]
+    );
+    const rank = parseInt(rankResult.rows[0].rank);
+
     res.json({
       id: user.id,
       username: user.username,
@@ -147,6 +156,7 @@ router.get('/me', authenticate, async (req, res) => {
       bio: user.bio,
       skeyeBalance: user.skeye_balance,
       role: user.role,
+      rank: rank,
       createdAt: user.created_at
     });
   } catch (error) {
