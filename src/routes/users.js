@@ -269,4 +269,38 @@ router.delete('/devices/:id', authenticate, async (req, res) => {
   }
 });
 
+// Get user's notification settings
+router.get('/me/notifications', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT notification_settings FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    
+    // Return saved settings or empty object
+    const settings = result.rows[0]?.notification_settings || {};
+    res.json(settings);
+  } catch (error) {
+    console.error('Get notification settings error:', error);
+    res.status(500).json({ error: 'Failed to get notification settings' });
+  }
+});
+
+// Update user's notification settings
+router.put('/me/notifications', authenticate, async (req, res) => {
+  try {
+    const { notifications } = req.body;
+    
+    await pool.query(
+      'UPDATE users SET notification_settings = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [JSON.stringify(notifications), req.user.id]
+    );
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Update notification settings error:', error);
+    res.status(500).json({ error: 'Failed to update notification settings' });
+  }
+});
+
 module.exports = router;
