@@ -92,6 +92,60 @@ router.get('/sightings/missing-thumbnails', authenticate, requireAdmin, async (r
   }
 });
 
+// Get all users (admin)
+router.get('/users', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        u.id, 
+        u.username, 
+        u.email, 
+        u.avatar_url,
+        u.role,
+        u.skeye_balance,
+        u.created_at,
+        u.last_active,
+        CASE 
+          WHEN u.last_active IS NOT NULL AND u.created_at IS NOT NULL 
+          THEN EXTRACT(EPOCH FROM (COALESCE(u.last_active, NOW()) - u.created_at)) / 60
+          ELSE 0 
+        END as total_minutes,
+        (SELECT COUNT(*) FROM sightings WHERE user_id = u.id) as clips_count,
+        (SELECT COUNT(*) FROM sighting_comments WHERE user_id = u.id) as comments_count,
+        (SELECT COUNT(*) FROM user_classifications WHERE user_id = u.id) as classifications_count
+      FROM users u
+      ORDER BY u.created_at DESC
+    `);
+    
+    res.json(result.rows.map(u => ({
+      id: u.id,
+      username: u.username,
+      email: u.email,
+      avatarUrl: u.avatar_url,
+      role: u.role,
+      skeyeBalance: u.skeye_balance || 0,
+      createdAt: u.created_at,
+      lastActive: u.last_active,
+      timeSpent: formatTimeSpent(u.total_minutes || 0),
+      stats: {
+        clipsCount: parseInt(u.clips_count) || 0,
+        commentsCount: parseInt(u.comments_count) || 0,
+        classificationsCount: parseInt(u.classifications_count) || 0
+      }
+    })));
+  } catch (error) {
+    console.error('Get users error:', error);
+    res.status(500).json({ error: 'Failed to get users' });
+  }
+});
+
+// Helper function to format time spent
+function formatTimeSpent(minutes) {
+  if (minutes < 60) return `${Math.round(minutes)}m`;
+  if (minutes < 1440) return `${Math.round(minutes / 60)}h`;
+  return `${Math.round(minutes / 1440)}d`;
+}
+
 // Get all sightings (admin)
 router.get('/sightings', authenticate, requireAdmin, async (req, res) => {
   try {
