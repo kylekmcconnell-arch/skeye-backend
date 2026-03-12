@@ -12,6 +12,7 @@ const sightingsRoutes = require('./routes/sightings');
 const usersRoutes = require('./routes/users');
 const notificationsRoutes = require('./routes/notifications');
 const adminRoutes = require('./routes/admin');
+const cameraRoutes = require('./routes/camera');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -32,7 +33,6 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function(origin, callback) {
-    // Allow requests with no origin (mobile apps, curl, etc.)
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
@@ -46,16 +46,16 @@ app.use(cors({
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: { error: 'Too many requests, please try again later.' }
 });
 app.use('/api/', limiter);
 
 // Auth rate limiting (stricter)
 const authLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 10, // limit each IP to 10 login attempts per hour
+  windowMs: 60 * 60 * 1000,
+  max: 10,
   message: { error: 'Too many login attempts, please try again later.' }
 });
 app.use('/api/auth/signin', authLimiter);
@@ -68,7 +68,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
   setHeaders: (res, path) => {
-    // Set proper headers for video streaming
     if (path.endsWith('.mp4') || path.endsWith('.webm')) {
       res.set('Accept-Ranges', 'bytes');
     }
@@ -82,6 +81,7 @@ app.use('/api/sightings', sightingsRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/camera', cameraRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -129,4 +129,5 @@ if (process.env.VERCEL !== '1') {
   });
 }
 
+module.exports = app;
 module.exports = app;
